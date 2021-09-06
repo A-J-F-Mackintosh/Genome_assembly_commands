@@ -1,0 +1,116 @@
+# assemble Pacbio CLR data using NextDenovo v2.4.0
+
+# config file looks like
+
+[General]
+job_type = local
+job_prefix = brenthis_ino.nextDenovo
+task = all # 'all', 'correct', 'assemble'
+rewrite = yes # yes/no
+deltmp = yes
+rerun = 0
+parallel_jobs = 4
+input_type = raw
+read_type = clr
+input_fofn = ./input.fofn
+workdir = ./01_rundir
+
+[correct_option]
+read_cutoff = 1k
+genome_size = 406000000
+pa_correction = 5
+sort_options = -m 50g -t 20
+minimap2_options_raw = -t 20
+correction_options = -p 20
+
+[assemble_option]
+minimap2_options_cns =  -t 20
+nextgraph_options = -a 1
+
+# input.fofn contains path to reads
+
+# run with
+
+~/software/NextDenovo/nextDenovo ino.cfg
+
+# change lowercase bases to uppercase and change contig names
+
+rsync -av 01_rundir/03.ctg_graph/nd.asm.fasta brenthis_ino.nextdenovo.contigs.fasta
+cat brenthis_ino.nextdenovo.contigs.fasta | tr "acgt" "ACGT" | tr -d " " | seqtk rename - contig_ > temp.fasta
+mv temp.fasta brenthis_ino.nextdenovo.contigs.fasta
+
+# polish the assembly with trimmed Illumina reads using HAPO-G
+
+hapog.py --genome brenthis_ino.nextdenovo.contigs.fasta \
+--pe1 SP_BI_364.200213_A00291_0260_AHJT32DRXX_2_11932LK0001L01_1.trim.fastq.gz \
+--pe2 SP_BI_364.200213_A00291_0260_AHJT32DRXX_2_11932LK0001L01_2.trim.fastq.gz \
+-u \
+--output brenthis_ino.nextdenovo.contigs.hapog_1 \
+--threads 60
+
+# repeat HAPO-G polishing once more
+
+ln -s brenthis_ino.nextdenovo.contigs.hapog_1/hapog_results/hapog.fasta brenthis_ino.nextdenovo.contigs.hapog_1.fasta
+
+hapog.py --genome brenthis_ino.nextdenovo.contigs.hapog_1.fasta \
+--pe1 SP_BI_364.200213_A00291_0260_AHJT32DRXX_2_11932LK0001L01_1.trim.fastq.gz \
+--pe2 SP_BI_364.200213_A00291_0260_AHJT32DRXX_2_11932LK0001L01_2.trim.fastq.gz \
+-u \
+--output brenthis_ino.nextdenovo.contigs.hapog_2 \
+--threads 60
+
+# identify contigs from non-target organisms with blobtools
+
+minimap2 -t 8 -a -x map-pb brenthis_ino.nextdenovo.contigs.hapog_2.fasta brenthis_ino.SP_BI_364.sequel.fasta.gz | \
+samtools sort -@ 8 -m 5G -T /scratch/amackintosh/SP_BI_364.tmp.bam - > \
+SP_BI_364.pacbio.vs.brenthis_ino.nextdenovo.contigs.hapog_2.bam && \
+samtools index SP_BI_364.pacbio.vs.brenthis_ino.nextdenovo.contigs.hapog_2.bam
+
+diamond blastx \
+--threads 60 \
+--db reference_proteomes.dmnd \
+--sensitive \
+--evalue 1e-25 \
+--outfmt 6 qseqid staxids bitscore sseqid \
+--max-target-seqs 10 \
+--query brenthis_ino.nextdenovo.contigs.hapog_2.fasta \
+--out brenthis_ino.nextdenovo.contigs.hapog_2.vs.uniprot.out
+
+blastn \
+-num_threads 60 \
+-max_target_seqs 10 \
+-max_hsps 1 \
+-db nt_v5 \
+-evalue 1e-25 \
+-outfmt '6 qseqid staxids bitscore std' \
+-query brenthis_ino.nextdenovo.contigs.hapog_2.fasta \
+-out brenthis_ino.nextdenovo.contigs.hapog_2.vs.ncbi_2019_09.nt.mts10.out
+
+blobtools create \
+-i brenthis_ino.nextdenovo.contigs.hapog_2.fasta \
+-t brenthis_ino.nextdenovo.contigs.hapog_2.vs.ncbi_2019_09.nt.mts10.out \
+-t brenthis_ino.nextdenovo.contigs.hapog_2.vs.uniprot.out \
+-x bestsumorder \
+-b SP_BI_364.pacbio.vs.brenthis_ino.nextdenovo.contigs.hapog_2.bam \
+--calculate_cov
+
+blobtools view -i blobDB.json -x bestsumorder
+
+# identify non-target contigs from blobDB.bestsumorder.table.txt and then remove
+
+blobtools seqfilter -i brenthis_ino.nextdenovo.contigs.hapog_2.fasta -l bacterial_contigs.txt -v
+mv brenthis_ino.nextdenovo.contigs.hapog_2.filtered.fna brenthis_ino.nextdenovo.contigs.hapog_2.clean.fasta
+
+# identify haplotigs and overlaps with purge_dups (keep repeats)
+
+minimap2 -t 50 -x map-pb brenthis_ino.nextdenovo.contigs.hapog_2.clean.fasta brenthis_ino.SP_BI_364.sequel.fasta.gz | \
+gzip -c - > SP_BI_364.pacbio.vs.brenthis_ino.nextdenovo.contigs.hapog_2.clean.paf.gz
+~/software/purge_dups/bin/pbcstat SP_BI_364.pacbio.vs.brenthis_ino.nextdenovo.contigs.hapog_2.clean.paf.gz
+~/software/purge_dups/bin/split_fa brenthis_ino.nextdenovo.contigs.hapog_2.clean.fasta > brenthis_ino.nextdenovo.contigs.hapog_2.clean.split
+minimap2 -t 50 -x asm5 -DP brenthis_ino.nextdenovo.contigs.hapog_2.clean.split brenthis_ino.nextdenovo.contigs.hapog_2.clean.split | \
+gzip -c - > brenthis_ino.nextdenovo.contigs.hapog_2.clean.split.paf.gz
+~/software/purge_dups/bin/calcuts -l 0 -m 40 -u 300 PB.stat > cutoffs 2> calcuts.log
+~/software/purge_dups/bin/purge_dups -a 60 -2 -T cutoffs -c PB.base.cov brenthis_ino.nextdenovo.contigs.hapog_2.clean.split.paf.gz > dups.bed 2> purge_dups.log
+cat dups.bed | grep -v "REPEAT" > dups.haplotigs_and_overlaps.bed
+~/software/purge_dups/bin/get_seqs -e dups.haplotigs_and_overlaps.bed brenthis_ino.nextdenovo.contigs.hapog_2.clean.fasta
+mv purged.fa brenthis_ino.SP_BI_364.nextdenovo.contigs.fasta
