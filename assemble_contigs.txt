@@ -101,7 +101,7 @@ blobtools view -i blobDB.json -x bestsumorder
 blobtools seqfilter -i brenthis_ino.nextdenovo.contigs.hapog_2.fasta -l bacterial_contigs.txt -v
 mv brenthis_ino.nextdenovo.contigs.hapog_2.filtered.fna brenthis_ino.nextdenovo.contigs.hapog_2.clean.fasta
 
-# identify haplotigs and overlaps with purge_dups (keep repeats)
+# identify and remove duplicated sequences with purge_dups (keep repeats)
 
 minimap2 -t 50 -x map-pb brenthis_ino.nextdenovo.contigs.hapog_2.clean.fasta brenthis_ino.SP_BI_364.sequel.fasta.gz | \
 gzip -c - > SP_BI_364.pacbio.vs.brenthis_ino.nextdenovo.contigs.hapog_2.clean.paf.gz
