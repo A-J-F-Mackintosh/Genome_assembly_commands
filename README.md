@@ -1,2 +1,2 @@
-# Genome_assembly_pipeline
-A pipeline for assembling Pacbio CLR + Illumina + HiC data
+# Genome_assembly_commands
+Commands for assembling Pacbio CLR + Illumina + HiC data
