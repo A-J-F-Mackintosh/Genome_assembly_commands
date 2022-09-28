@@ -1,0 +1,52 @@
+# HiC reads are already trimmed
+
+# bwa index the assembly
+
+bwa index 3_ref/brenthis_daphne.BD_1141.v1_3.contigs.fasta
+
+# map HiC using the Arima pipeline
+
+bwa mem -t 24 3_ref/brenthis_daphne.BD_1141.v1_3.contigs.fasta 2_fastp/FR_BD_1329.HiC.1.trim.fastq.gz | samtools view -b - > 4_bwa/FR_BD_1329.HiC.1.vs.brenthis_daphne.BD_1141.v1_3.contigs.bam && bwa mem -t 24 3_ref/brenthis_daphne.BD_1141.v1_3.contigs.fasta 2_fastp/FR_BD_1329.HiC.2.trim.fastq.gz | samtools view -b - > 4_bwa/FR_BD_1329.HiC.2.vs.brenthis_daphne.BD_1141.v1_3.contigs.bam
+
+# fix five prime ends
+
+samtools view -h 4_bwa/FR_BD_1329.HiC.1.vs.brenthis_daphne.BD_1141.v1_3.contigs.bam | ~/software/mapping_pipeline/filter_five_end.pl | samtools view -b - > 4_bwa/FR_BD_1329.HiC.1.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.bam && samtools view -h 4_bwa/FR_BD_1329.HiC.2.vs.brenthis_daphne.BD_1141.v1_3.contigs.bam | ~/software/mapping_pipeline/filter_five_end.pl | samtools view -b - > 4_bwa/FR_BD_1329.HiC.2.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.bam
+
+# combine bams
+
+~/software/mapping_pipeline/two_read_bam_combiner.pl 4_bwa/FR_BD_1329.HiC.1.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.bam 4_bwa/FR_BD_1329.HiC.2.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.bam samtools 1 | samtools view -h -t 3_ref/brenthis_daphne.BD_1141.v1_3.contigs.fasta - | samtools sort -@ 16 -T /scratch/amackintosh/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.temp.bam -o 4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.bam -
+
+# add read groups
+
+picard AddOrReplaceReadGroups INPUT=4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.bam OUTPUT=4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.bam ID=FR_BD_1329 LB=FR_BD_1329 SM=FR_BD_1329 PL=ILLUMINA PU=none && samtools index 4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.bam
+
+# remove duplicates and sort by read name
+
+sambamba markdup -r -t 16 4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.bam 4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.MD.bam && samtools sort -n -@ 16 -T /scratch/amackintosh/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.MD.sorted_by_name.bam.temp.bam -o 4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.MD.sorted_by_name.bam 4_bwa/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.MD.bam
+
+# run yahs
+
+yahs -o 2_yahs/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs 0_contigs/brenthis_daphne.BD_1141.v1_3.contigs.fasta 1_bams/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.ffe.combined.RG.MD.sorted_by_name.bam
+
+# make a hic file
+
+~/software/yahs/juicer pre -a -o FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.JBAT FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs.bin FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.agp ../0_contigs/brenthis_daphne.BD_1141.v1_3.contigs.fasta.fai > FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.JBAT.log 2>&1
+
+java -Xmx36G -jar ${juicer_tools} pre FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.JBAT.txt FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.JBAT.hic <(echo "assembly 419090165")
+
+# visual in juicebox
+# if needed, do some edits in juicebox to make a new assembly file
+
+# if edits have been made, then make the final assembly
+
+~/software/yahs/juicer post -o FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.reviewed FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.JBAT.review.assembly ../3_juicebox_prep/FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.JBAT.liftover.agp ../0_contigs/brenthis_daphne.BD_1141.v1_3.contigs.fasta
+
+# format chromosomes and contigs
+
+seqkit seq -m 10000000 FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.reviewed.FINAL.fa | seqtk rename - brenthis_daphne.ES_BD_1141.chromosome_ > brenthis_daphne.ES_BD_1141.chromosomes.fasta
+
+seqkit seq -M 10000000 FR_BD_1329.HiC.vs.brenthis_daphne.BD_1141.v1_3.contigs_scaffolds_final.reviewed.FINAL.fa | seqtk rename - brenthis_daphne.ES_BD_1141.contig_ > brenthis_daphne.ES_BD_1141.contigs.fasta
+
+cat brenthis_daphne.ES_BD_1141.chromosomes.fasta >> ../5_finished_assemblies/brenthis_daphne.ES_BD_1141.v2_0.sequences.fasta
+
+cat brenthis_daphne.ES_BD_1141.contigs.fasta >> ../5_finished_assemblies/brenthis_daphne.ES_BD_1141.v2_0.sequences.fasta
